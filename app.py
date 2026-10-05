@@ -21,10 +21,7 @@ cfg = Config()
 # 1. Databricks SQL Helper Functions (OFFICIAL DATABRICKS APPS AUTH PATTERN)
 def get_db_connection():
     """Establishes a connection to the SQL Warehouse using the App's native Service Principal context."""
-    # Pull the HTTP path from your environment variables or hardcode your SQL Warehouse HTTP path string here
     http_path = os.environ.get("DATABRICKS_SQL_HTTP_PATH", "/sql/1.0/warehouses/your-warehouse-id-here")
-    
-    # Strip any accidental 'https://' prefix if appended by the system environment wrapper
     server_host = cfg.host
     if server_host and server_host.startswith("https://"):
         server_host = server_host.replace("https://", "", 1)
@@ -32,19 +29,35 @@ def get_db_connection():
     return sql.connect(
         server_hostname=server_host,
         http_path=http_path,
-        # This securely signs the connection request using the background service identity credentials
-        credentials_provider=lambda: cfg.authenticate
+        credentials_provider=lambda: cfg.authenticate,
+        # Set short connection timeouts so our retry loop can take control quickly
+        _connection_timeout=15 
     )
 
 def query_as_dataframe(query, params=None):
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query, params or ())
-            if cursor.description is None:
-                return pd.DataFrame()
-            columns = [desc[0] for desc in cursor.description]
-            data = cursor.fetchall()
-            return pd.DataFrame(data, columns=columns)
+    """Executes a SQL query, adding automatic retries if the SQL warehouse is spinning up."""
+    max_retries = 5
+    retry_delay = 10 # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, params or ())
+                    if cursor.description is None:
+                        return pd.DataFrame()
+                    columns = [desc[0] for desc in cursor.description]
+                    data = cursor.fetchall()
+                    return pd.DataFrame(data, columns=columns)
+        except Exception as e:
+            # Check if error is related to warehouse starting up or connection timeouts
+            print(f"⚠️ SQL Warehouse connection attempt {attempt + 1} failed. Retrying in {retry_delay}s... Error: {e}")
+            if attempt == max_retries - 1:
+                # Out of retries, raise the error to Flask
+                raise e
+            time.sleep(retry_delay)
+            
+    return pd.DataFrame()
 
 
 # 2. Capacity Business Logic Engine
