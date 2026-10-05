@@ -123,19 +123,41 @@ def fetch_capacity_metrics(department_filter=None):
 
 # 3. HTTP Routes
 
+# Replace your summary routes section with this block:
+
 @app.route('/')
 def index():
     return redirect(url_for('portfolio_summary'))
 
 @app.route('/summary')
 def portfolio_summary():
+    """
+    INSTANT ROUTE: Renders the structural page outline immediately 
+    without querying the database, bypassing the 60s proxy timeout completely.
+    """
     selected_dept = request.args.get('department', '')
     
-    depts_df = query_as_dataframe("SELECT DISTINCT DEPARTMENT FROM EMPLOYEE WHERE DEPARTMENT IS NOT NULL ORDER BY DEPARTMENT")
-    departments = depts_df['DEPARTMENT'].tolist() if not depts_df.empty else []
-    
-    metrics = fetch_capacity_metrics(selected_dept if selected_dept else None)
-    return render_template('summary.html', metrics=metrics, departments=departments, selected_dept=selected_dept)
+    # We use a fast, light query just for the filter dropdown options
+    try:
+        depts_df = query_as_dataframe("SELECT DISTINCT DEPARTMENT FROM EMPLOYEE WHERE DEPARTMENT IS NOT NULL ORDER BY DEPARTMENT")
+        departments = depts_df['DEPARTMENT'].tolist() if not depts_df.empty else []
+    except Exception:
+        departments = [] # Safe fallback if warehouse is sleeping during initial ping
+        
+    return render_template('summary.html', departments=departments, selected_dept=selected_dept)
+
+@app.route('/api/metrics')
+def metrics_api():
+    """
+    BACKGROUND API: Called asynchronously by JavaScript. If this takes 
+    longer than 60s, it won't crash the main user interface.
+    """
+    selected_dept = request.args.get('department', None)
+    try:
+        metrics = fetch_capacity_metrics(selected_dept if selected_dept else None)
+        return {"status": "success", "data": metrics}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}, 500
 
 @app.route('/manage', methods=['GET', 'POST'])
 def manage_allocations():
