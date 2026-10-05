@@ -3,7 +3,14 @@ import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, flash
 from databricks import sql
 
-app = Flask(__name__)
+# Get the exact absolute directory path of the active script
+base_dir = os.path.abspath(os.path.dirname(__file__))
+
+app = Flask(
+    __name__,
+    template_folder=os.path.join(base_dir, 'templates'),
+    static_folder=os.path.join(base_dir, 'static')
+)
 app.secret_key = os.urandom(24)
 
 # 1. Databricks SQL Helper Functions
