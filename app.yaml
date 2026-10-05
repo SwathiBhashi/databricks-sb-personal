@@ -1,1 +1,6 @@
+# app.yaml
 command: [ "python", "app.py" ]
+
+env:
+  - name: DATABRICKS_SQL_HTTP_PATH
+    value: "/sql/1.0/warehouses/your-warehouse-http-path-string-here"
