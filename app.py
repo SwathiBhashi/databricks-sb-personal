@@ -181,5 +181,13 @@ def manage_allocations():
 
 
 if __name__ == '__main__':
-    # Databricks Apps routes proxying via Port 8000 natively
-    app.run(host='0.0.0.0', port=8000, debug=True)
+    # Safely extract the dynamic system integer provided by Databricks
+    port_str = os.environ.get("DATABRICKS_APP_PORT")
+    
+    if port_str and port_str.isdigit():
+        port = int(port_str)
+    else:
+        port = 8000 # Local testing fallback
+        
+    print(f"🚀 Starting Capacity Planner App on target port: {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
