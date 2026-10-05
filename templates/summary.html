@@ -3,7 +3,7 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>📊 Portfolio Summary Dashboard</h2>
     <form method="GET" class="d-flex gap-2 bg-white p-2 rounded shadow-sm">
-        <select name="department" class="form-select" style="min-width: 220px;">
+        <select name="department" id="deptSelector" class="form-select" style="min-width: 220px;">
             <option value="">All Departments</option>
             {% for dept in departments %}
                 <option value="{{ dept }}" {% if selected_dept == dept %}selected{% endif %}>{{ dept }}</option>
@@ -13,21 +13,59 @@
     </form>
 </div>
 
+<!-- Cards initialized with clean, dynamic loading animations -->
 <div class="row g-4">
     {% for period, label in [('current_week', '🗓️ Current Week'), ('next_week', '⏭️ Next Week'), ('next_month', '📅 Next Month')] %}
     <div class="col-md-4">
         <div class="card shadow-sm border-0">
             <div class="card-header bg-secondary text-white fw-bold">{{ label }}</div>
             <div class="card-body">
-                <ul class="list-group list-group-flush">
-                    <li class="list-group-item d-flex justify-content-between">Active Resources: <span class="badge bg-primary fs-6">{{ metrics[period]['active'] }}</span></li>
-                    <li class="list-group-item d-flex justify-content-between">Under-allocation: <span class="badge bg-warning text-dark fs-6">{{ metrics[period]['under'] }}</span></li>
-                    <li class="list-group-item d-flex justify-content-between">Over-allocation: <span class="badge bg-danger fs-6">{{ metrics[period]['over'] }}</span></li>
-                    <li class="list-group-item d-flex justify-content-between">Optimal-allocation: <span class="badge bg-success fs-6">{{ metrics[period]['optimal'] }}</span></li>
+                <ul class="list-group list-group-flush" id="metrics-{{ period }}">
+                    <li class="list-group-item text-center py-4 text-muted">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                        Waking up Lakebase...
+                    </li>
                 </ul>
             </div>
         </div>
     </div>
     {% endfor %}
 </div>
+
+<!-- Asynchronous Background Fetch Script -->
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const selectedDept = document.getElementById("deptSelector").value;
+    
+    // Fetch metrics from the API route asynchronously
+    fetch(`/api/metrics?department=${encodeURIComponent(selectedDept)}`)
+        .then(response => response.json())
+        .then(res => {
+            if (res.status === "success") {
+                updatePeriodCard('current_week', res.data.current_week);
+                updatePeriodCard('next_week', res.data.next_week);
+                updatePeriodCard('next_month', res.data.next_month);
+            } else {
+                showErrorMessaging("Database connection failed. Please refresh.");
+            }
+        })
+        .catch(err => showErrorMessaging("Timeout communicating with backend."));
+});
+
+function updatePeriodCard(periodId, data) {
+    const container = document.getElementById(`metrics-${periodId}`);
+    container.innerHTML = `
+        <li class="list-group-item d-flex justify-content-between align-items-center">Active Resources: <span class="badge bg-primary fs-6">${data.active}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">Under-allocation: <span class="badge bg-warning text-dark fs-6">${data.under}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">Over-allocation: <span class="badge bg-danger fs-6">${data.over}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">Optimal-allocation: <span class="badge bg-success fs-6">${data.optimal}</span></li>
+    `;
+}
+
+function showErrorMessaging(msg) {
+    ['current_week', 'next_week', 'next_month'].forEach(p => {
+        document.getElementById(`metrics-${p}`).innerHTML = `<li class="list-group-item list-group-item-danger text-center small">${msg}</li>`;
+    });
+}
+</script>
 {% endblock %}
