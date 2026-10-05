@@ -2,6 +2,8 @@ import os
 import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, flash
 from databricks import sql
+# IMPORT THE OFFICIAL SDK AUTHENTICATION LAYER
+from databricks.sdk.core import Config
 
 # Get the exact absolute directory path of the active script
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -13,24 +15,26 @@ app = Flask(
 )
 app.secret_key = os.urandom(24)
 
+# Automatically pulls workspace variables (HOST, CLIENT_ID, CLIENT_SECRET) from Databricks Apps runtime environment
+cfg = Config()
 
-# 1. Databricks SQL Helper Functions (FIXED HOST STRING SPLIT)
+# 1. Databricks SQL Helper Functions (OFFICIAL DATABRICKS APPS AUTH PATTERN)
 def get_db_connection():
-    """Establishes a connection to the Lakebase SQL Warehouse automatically inside Databricks Apps."""
-    server_hostname = os.environ.get("DATABRICKS_HOST")
-    http_path = os.environ.get("DATABRICKS_SQL_HTTP_PATH")
+    """Establishes a connection to the SQL Warehouse using the App's native Service Principal context."""
+    # Pull the HTTP path from your environment variables or hardcode your SQL Warehouse HTTP path string here
+    http_path = os.environ.get("DATABRICKS_SQL_HTTP_PATH", "/sql/1.0/warehouses/your-warehouse-id-here")
     
-    # FIX: Properly extract index [0] to keep it a clean string domain name
-    if server_hostname and server_hostname.startswith("https://"):
-        server_hostname = server_hostname.replace("https://", "", 1).split("/")[0]
+    # Strip any accidental 'https://' prefix if appended by the system environment wrapper
+    server_host = cfg.host
+    if server_host and server_host.startswith("https://"):
+        server_host = server_host.replace("https://", "", 1)
 
     return sql.connect(
-        server_hostname=server_hostname,
+        server_hostname=server_host,
         http_path=http_path,
-        # Natively map your app context credentials
-        access_token=os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_CLIENT_SECRET")
+        # This securely signs the connection request using the background service identity credentials
+        credentials_provider=lambda: cfg.authenticate
     )
-
 
 def query_as_dataframe(query, params=None):
     with get_db_connection() as conn:
@@ -38,10 +42,10 @@ def query_as_dataframe(query, params=None):
             cursor.execute(query, params or ())
             if cursor.description is None:
                 return pd.DataFrame()
-            # Safely grab the column string names from description tuple positions
             columns = [desc[0] for desc in cursor.description]
             data = cursor.fetchall()
             return pd.DataFrame(data, columns=columns)
+
 
 # 2. Capacity Business Logic Engine
 def fetch_capacity_metrics(department_filter=None):
