@@ -26,11 +26,14 @@ def query_as_dataframe(query, params=None):
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(query, params or ())
+            if cursor.description is None:
+                return pd.DataFrame()
+            # FIX: Properly extract just the string header name from the description tuple
             columns = [desc[0] for desc in cursor.description]
             data = cursor.fetchall()
             return pd.DataFrame(data, columns=columns)
 
-# 2. Capacity Business Logic Engine (UPDATED TO USE e.CAPEX)
+# 2. Capacity Business Logic Engine
 def fetch_capacity_metrics(department_filter=None):
     """
     Calculates active, under, over, and optimal resource metrics 
@@ -53,7 +56,7 @@ def fetch_capacity_metrics(department_filter=None):
             SELECT 
                 e.employee_id,
                 e.DEPARTMENT,
-                COALESCE(e.CAPEX, 100.00) as capex_target, -- Dynamically using the new CAPEX column
+                COALESCE(e.CAPEX, 100.00) as capex_target,
                 
                 -- Current Week Allocations
                 SUM(CASE WHEN a.is_active = true AND a.start_date <= dw.cur_wk_end AND (a.end_date IS NULL OR a.end_date >= dw.cur_wk_start) 
@@ -95,14 +98,12 @@ def fetch_capacity_metrics(department_filter=None):
 
 @app.route('/')
 def index():
-    """Fallback index route listening to the root and redirecting to /summary."""
     return redirect(url_for('portfolio_summary'))
 
 @app.route('/summary')
 def portfolio_summary():
     selected_dept = request.args.get('department', '')
     
-    # Get dynamic filters from database
     depts_df = query_as_dataframe("SELECT DISTINCT DEPARTMENT FROM EMPLOYEE WHERE DEPARTMENT IS NOT NULL ORDER BY DEPARTMENT")
     departments = depts_df['DEPARTMENT'].tolist() if not depts_df.empty else []
     
@@ -128,13 +129,15 @@ def manage_allocations():
             flash("❌ Validation Failed: A resource cannot be allocated to more than 5 projects simultaneously.", "danger")
             return redirect(url_for('manage_allocations'))
 
-        # --- VALIDATION 2: Check limit utilizing the brand-new employee profile CAPEX target ---
+        # --- VALIDATION 2: Check limit with dynamic employee profile target ---
         emp_target_df = query_as_dataframe("SELECT COALESCE(CAPEX, 100) as target_limit FROM EMPLOYEE WHERE employee_id = %s", (emp_id,))
+        # FIX: Added .iloc[0] safely to extract row data values
         capex_target = float(emp_target_df['target_limit'].iloc[0] if not emp_target_df.empty else 100.00)
 
         alloc_query = "SELECT SUM(allocation_percentage) as total FROM allocation WHERE employee_id = %s AND is_active = true"
         total_alloc_df = query_as_dataframe(alloc_query, (emp_id,))
-        current_total = float(total_alloc_df['total'].iloc[0] if not total_alloc_df.empty and total_alloc_df['total'].iloc[0] is not None else 0)
+        # FIX: Used .fillna(0).iloc[0] for clean numeric conversions
+        current_total = float(total_alloc_df['total'].fillna(0).iloc[0] if not total_alloc_df.empty else 0)
         
         existing_match = query_as_dataframe("SELECT allocation_percentage FROM allocation WHERE employee_id=%s AND project_id=%s AND is_active=true", (emp_id, project_id))
         old_alloc = float(existing_match['allocation_percentage'].iloc[0] if not existing_match.empty else 0)
@@ -163,7 +166,7 @@ def manage_allocations():
         flash("💪 Allocation successfully saved!", "success")
         return redirect(url_for('manage_allocations'))
 
-    # GET workflow filters handling
+    # GET workflow metrics display logic
     f_emp = request.args.get('employee_name', '')
     f_mgr = request.args.get('line_manager', '')
     f_dept = request.args.get('department', '')
