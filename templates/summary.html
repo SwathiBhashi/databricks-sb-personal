@@ -1,39 +1,9 @@
-{% extends 'layout.html' %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>📊 Portfolio Summary Dashboard</h2>
-    <form method="GET" class="d-flex gap-2 bg-white p-2 rounded shadow-sm">
-        <select name="department" id="deptSelector" class="form-select" style="min-width: 220px;">
-            <option value="">Loading Departments...</option>
-        </select>
-        <button type="submit" class="btn btn-primary">Filter</button>
-    </form>
-</div>
-
-<div class="row g-4">
-    {% for period, label in [('current_week', '🗓️ Current Week'), ('next_week', '⏭️ Next Week'), ('next_month', '📅 Next Month')] %}
-    <div class="col-md-4">
-        <div class="card shadow-sm border-0">
-            <div class="card-header bg-secondary text-white fw-bold">{{ label }}</div>
-            <div class="card-body">
-                <ul class="list-group list-group-flush" id="metrics-{{ period }}">
-                    <li class="list-group-item text-center py-4 text-muted">
-                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                        Waking up Lakebase Analytics Engine...
-                    </li>
-                </ul>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
-
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     const urlParams = new URLSearchParams(window.location.search);
     const selectedDept = urlParams.get('department') || '';
     
-    // Step 1: Load Dropdown Options in Background
+    // 1. Asynchronously Load Dropdown Options
     fetch('/api/departments')
         .then(r => r.json())
         .then(res => {
@@ -52,19 +22,28 @@ document.addEventListener("DOMContentLoaded", function() {
             document.getElementById("deptSelector").innerHTML = '<option value="">All Departments</option>';
         });
 
-    // Step 2: Fetch Capacity Figures without Blocking UI
+    // 2. Fetch Capacity Figures and Surface Backend Errors Directly
     fetch(`/api/metrics?department=${encodeURIComponent(selectedDept)}`)
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) {
+                // If Flask returns a 500 error, pass the error text along
+                return r.json().then(errData => { throw new Error(errData.message || "Internal Server Error"); });
+            }
+            return r.json();
+        })
         .then(res => {
             if (res.status === "success") {
                 updatePeriodCard('current_week', res.data.current_week);
                 updatePeriodCard('next_week', res.data.next_week);
                 updatePeriodCard('next_month', res.data.next_month);
             } else {
-                showErrorMessaging("Database processing delayed. Refresh shortly.");
+                showErrorMessaging(res.message || "Database processing delayed.");
             }
         })
-        .catch(() => showErrorMessaging("Gateway timeout waiting for warehouse to run."));
+        .catch((error) => {
+            console.error("Capacity App Error:", error);
+            showErrorMessaging(`⚠️ Link State: ${error.message}`);
+        });
 });
 
 function updatePeriodCard(periodId, data) {
@@ -78,8 +57,10 @@ function updatePeriodCard(periodId, data) {
 
 function showErrorMessaging(msg) {
     ['current_week', 'next_week', 'next_month'].forEach(p => {
-        document.getElementById(`metrics-${p}`).innerHTML = `<li class="list-group-item list-group-item-danger text-center small">${msg}</li>`;
+        document.getElementById(`metrics-${p}`).innerHTML = `
+            <li class="list-group-item list-group-item-danger text-center py-3">
+                <small class="fw-bold">${msg}</small>
+            </li>`;
     });
 }
 </script>
-{% endblock %}
