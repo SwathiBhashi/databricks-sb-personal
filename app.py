@@ -1,36 +1,9 @@
-import os
-import pandas as pd
-from flask import Flask, render_template, request, redirect, url_for, flash
-from databricks import sql
-
-app = Flask(__name__)
-app.secret_key = os.urandom(24)
-
-# 1. Databricks SQL Helper Functions
-def get_db_connection():
-    """Establishes a connection to the Lakebase SQL Warehouse automatically."""
-    return sql.connect(
-        server_hostname=os.environ.get("DATABRICKS_HOST"),
-        http_path=os.environ.get("DATABRICKS_SQL_HTTP_PATH"),
-        credentials_provider=lambda: os.environ.get("DATABRICKS_TOKEN")
-    )
-
-def query_as_dataframe(query, params=None):
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query, params or ())
-            columns = [desc[0] for desc in cursor.description]
-            data = cursor.fetchall()
-            return pd.DataFrame(data, columns=columns)
-
-# 2. Capacity Business Logic Engine
+# 2. Capacity Business Logic Engine (UPDATED TO USE e.CAPEX)
 def fetch_capacity_metrics(department_filter=None):
     """
     Calculates active, under, over, and optimal resource metrics 
-    by checking total active project allocations against their Capex target.
+    by checking total active project allocations against their custom Employee Capex target.
     """
-    # Note: Replace '100.00' below with an employee's actual profile column 
-    # if Capex target % gets added to the EMPLOYEE table later. Currently assumes default 100%.
     where_clause = ""
     params = []
     if department_filter:
@@ -48,7 +21,7 @@ def fetch_capacity_metrics(department_filter=None):
             SELECT 
                 e.employee_id,
                 e.DEPARTMENT,
-                100.00 as capex_target, -- Placeholder for capex allocation target %
+                COALESCE(e.CAPEX, 100.00) as capex_target, -- Dynamically using the new CAPEX column
                 
                 -- Current Week Allocations
                 SUM(CASE WHEN a.is_active = true AND a.start_date <= dw.cur_wk_end AND (a.end_date IS NULL OR a.end_date >= dw.cur_wk_start) 
@@ -65,7 +38,7 @@ def fetch_capacity_metrics(department_filter=None):
             CROSS JOIN date_windows dw
             LEFT JOIN allocation a ON e.employee_id = a.employee_id
             {where_clause}
-            GROUP BY e.employee_id, e.DEPARTMENT, dw.cur_wk_start, dw.cur_wk_end, dw.nxt_wk_start, dw.nxt_wk_end, dw.nxt_mn_start, dw.nxt_mn_end
+            GROUP BY e.employee_id, e.DEPARTMENT, e.CAPEX, dw.cur_wk_start, dw.cur_wk_end, dw.nxt_wk_start, dw.nxt_wk_end, dw.nxt_mn_start, dw.nxt_mn_end
         )
         SELECT * FROM emp_allocations
     """
@@ -86,34 +59,18 @@ def fetch_capacity_metrics(department_filter=None):
         }
     return metrics
 
-# 3. HTTP Routes
-@app.route('/')
-def index():
-    return redirect(url_for('portfolio_summary'))
 
-@app.route('/summary')
-def portfolio_summary():
-    selected_dept = request.args.get('department', '')
-    
-    # Get dynamic filters from database
-    depts_df = query_as_dataframe("SELECT DISTINCT DEPARTMENT FROM EMPLOYEE WHERE DEPARTMENT IS NOT NULL ORDER BY DEPARTMENT")
-    departments = depts_df['DEPARTMENT'].tolist() if not depts_df.empty else []
-    
-    metrics = fetch_capacity_metrics(selected_dept if selected_dept else None)
-    return render_template('summary.html', metrics=metrics, departments=departments, selected_dept=selected_dept)
-
+# 3. Dynamic Form Validation Block (UPDATED TO VALIDATE AGAINST e.CAPEX)
 @app.route('/manage', methods=['GET', 'POST'])
 def manage_allocations():
     if request.method == 'POST':
-        # Handle adding/updating allocation data
         emp_id = request.form.get('employee_id')
         project_id = int(request.form.get('project_id'))
         new_alloc = float(request.form.get('allocation_percentage'))
         start_date = request.form.get('start_date')
         end_date = request.form.get('end_date') or None
 
-        # --- VALIDATIONS ---
-        # 1. Fetch current projects assigned to this person (excluding closed allocations)
+        # --- VALIDATION 1: Project count restriction (< 5) ---
         proj_query = "SELECT project_id FROM allocation WHERE employee_id = %s AND is_active = true"
         existing_projs = query_as_dataframe(proj_query, (emp_id,))
         unique_projects = set(existing_projs['project_id'].tolist() if not existing_projs.empty else [])
@@ -123,52 +80,49 @@ def manage_allocations():
             flash("❌ Validation Failed: A resource cannot be allocated to more than 5 projects simultaneously.", "danger")
             return redirect(url_for('manage_allocations'))
 
-        # 2. Fetch total sum utilization if this change goes through
+        # --- VALIDATION 2: Check limit utilizing the brand-new employee profile CAPEX target ---
+        emp_target_df = query_as_dataframe("SELECT COALESCE(CAPEX, 100) as target_limit FROM EMPLOYEE WHERE employee_id = %s", (emp_id,))
+        capex_target = float(emp_target_df['target_limit'].iloc[0] if not emp_target_df.empty else 100.00)
+
         alloc_query = "SELECT SUM(allocation_percentage) as total FROM allocation WHERE employee_id = %s AND is_active = true"
         total_alloc_df = query_as_dataframe(alloc_query, (emp_id,))
-        current_total = float(total_alloc_df['total'].iloc[0] or 0)
+        current_total = float(total_alloc_df['total'].iloc[0] if not total_alloc_df.empty and total_alloc_df['total'].iloc[0] is not None else 0)
         
-        # Determine if updating an existing record or adding a new one
         existing_match = query_as_dataframe("SELECT allocation_percentage FROM allocation WHERE employee_id=%s AND project_id=%s AND is_active=true", (emp_id, project_id))
-        old_alloc = float(existing_match['allocation_percentage'].iloc[0] or 0) if not existing_match.empty else 0
+        old_alloc = float(existing_match['allocation_percentage'].iloc[0] if not existing_match.empty else 0)
         
         projected_total = current_total - old_alloc + new_alloc
-        capex_target = 100.00 # Standard baseline capex target limit
 
         if projected_total > capex_target:
-            flash(f"❌ Validation Failed: Resource would become over-utilised ({projected_total}% exceeds target baseline {capex_target}%).", "danger")
+            flash(f"❌ Validation Failed: Resource would become over-utilised ({projected_total}% exceeds this employee's custom Capex target of {capex_target}%).", "danger")
             return redirect(url_for('manage_allocations'))
 
         # --- WRITE BACK TO LAKEBASE ---
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 if old_alloc > 0:
-                    # Update Record
                     cursor.execute("""
                         UPDATE allocation 
                         SET allocation_percentage = %s, start_date = %s, end_date = %s, updated_at = current_timestamp()
                         WHERE employee_id = %s AND project_id = %s AND is_active = true
                     """, (new_alloc, start_date, end_date, emp_id, project_id))
                 else:
-                    # Insert Record
                     cursor.execute("""
                         INSERT INTO allocation (employee_id, project_id, allocation_percentage, start_date, end_date, effective_from_date, is_active)
                         VALUES (%s, %s, %s, %s, %s, current_date(), true)
-                    """, (emp_id, project_id, new_alloc, start_date, end_date))
+                    """, (new_alloc, start_date, end_date, emp_id, project_id))
         
         flash("💪 Allocation successfully saved!", "success")
         return redirect(url_for('manage_allocations'))
 
-    # GET Workflow handling & filtering
+    # Rest of the GET workflow filters remain intact...
     f_emp = request.args.get('employee_name', '')
     f_mgr = request.args.get('line_manager', '')
     f_dept = request.args.get('department', '')
 
-    # Fetch lookup components
     projects = query_as_dataframe("SELECT project_id, project_name FROM project WHERE is_active=true ORDER BY project_name").to_dict(orient='records')
     employees_lookup = query_as_dataframe("SELECT employee_id, first_name, last_name FROM EMPLOYEE ORDER BY last_name").to_dict(orient='records')
 
-    # Build filtered Allocations Master View
     alloc_master_query = """
         SELECT 
             a.allocation_id, e.employee_id, concat(e.first_name, ' ', e.last_name) as emp_name,
@@ -180,7 +134,6 @@ def manage_allocations():
         WHERE a.is_active = true
     """
     
-    # Simple dynamic filter text appending
     conditions = []
     params = []
     if f_emp:
@@ -201,7 +154,3 @@ def manage_allocations():
 
     return render_template('manage.html', allocations=allocations, projects=projects, 
                            employees=employees_lookup, f_emp=f_emp, f_mgr=f_mgr, f_dept=f_dept)
-
-if __name__ == '__main__':
-    # Databricks Apps routes proxying via Port 8000 natively
-    app.run(host='0.0.0.0', port=8000, debug=True)
