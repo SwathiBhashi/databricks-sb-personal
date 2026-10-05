@@ -13,13 +13,22 @@ app = Flask(
 )
 app.secret_key = os.urandom(24)
 
-# 1. Databricks SQL Helper Functions
+# 1. Databricks SQL Helper Functions (FIXED AUTHENTICATION)
 def get_db_connection():
-    """Establishes a connection to the Lakebase SQL Warehouse automatically."""
+    """Establishes a connection to the Lakebase SQL Warehouse automatically inside Databricks Apps."""
+    # Databricks Apps standard configurations map to specific workspace keywords
+    server_hostname = os.environ.get("DATABRICKS_HOST")
+    http_path = os.environ.get("DATABRICKS_SQL_HTTP_PATH")
+    
+    # Strip any accidental 'https://' prefix if appended by the system env variables
+    if server_hostname and server_hostname.startswith("https://"):
+        server_hostname = server_hostname.replace("https://", "", 1).split("/")[0]
+
     return sql.connect(
-        server_hostname=os.environ.get("DATABRICKS_HOST"),
-        http_path=os.environ.get("DATABRICKS_SQL_HTTP_PATH"),
-        credentials_provider=lambda: os.environ.get("DATABRICKS_TOKEN")
+        server_hostname=server_hostname,
+        http_path=http_path,
+        # Natively uses the App's service credential identity context injected in the runtime
+        access_token=os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_CLIENT_SECRET")
     )
 
 def query_as_dataframe(query, params=None):
@@ -28,7 +37,7 @@ def query_as_dataframe(query, params=None):
             cursor.execute(query, params or ())
             if cursor.description is None:
                 return pd.DataFrame()
-            # FIX: Properly extract just the string header name from the description tuple (desc[0])
+            # Safely grab the column string names from description tuple positions
             columns = [desc[0] for desc in cursor.description]
             data = cursor.fetchall()
             return pd.DataFrame(data, columns=columns)
