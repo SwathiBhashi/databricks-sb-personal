@@ -1,0 +1,84 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>⚙️ Manage Allocations Data Entry</h2>
+
+<!-- Entry Form -->
+<div class="card my-4 border-0 shadow-sm">
+    <div class="card-header bg-primary text-white fw-bold">Add / Edit Allocation Percentage</div>
+    <div class="card-body">
+        <form method="POST" class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Select Employee</label>
+                <select name="employee_id" class="form-select" required>
+                    <option value="" disabled selected>Choose resource...</option>
+                    {% for emp in employees %}
+                        <option value="{{ emp.employee_id }}">{{ emp.last_name }}, {{ emp.first_name }} ({{ emp.employee_id }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Select Target Project</label>
+                <select name="project_id" class="form-select" required>
+                    <option value="" disabled selected>Choose project...</option>
+                    {% for proj in projects %}
+                        <option value="{{ proj.project_id }}">{{ proj.project_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Allocation %</label>
+                <input type="number" step="0.01" name="allocation_percentage" class="form-value form-control" placeholder="e.g. 50.00" min="0" max="100" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Start Date</label>
+                <input type="date" name="start_date" class="form-control" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">End Date (Optional)</label>
+                <input type="date" name="end_date" class="form-control">
+            </div>
+            <div class="col-12 text-end">
+                <button type="submit" class="btn btn-success px-4 fw-semibold">Save Allocation Data</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Allocations List View with Table Filters -->
+<h3 class="mt-5 mb-3">📋 Active Allocations Overview</h3>
+<form method="GET" class="row g-2 mb-3 bg-white p-3 rounded shadow-sm">
+    <div class="col-md-3"><input type="text" name="employee_name" class="form-control" placeholder="Search Employee..." value="{{ f_emp }}"></div>
+    <div class="col-md-3"><input type="text" name="line_manager" class="form-control" placeholder="Search Line Manager..." value="{{ f_mgr }}"></div>
+    <div class="col-md-3"><input type="text" name="department" class="form-control" placeholder="Search Department..." value="{{ f_dept }}"></div>
+    <div class="col-md-3 d-grid"><button type="submit" class="btn btn-dark">Apply Filters</button></div>
+</form>
+
+<div class="table-responsive bg-white rounded shadow-sm">
+    <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+            <tr>
+                <th>Resource Name</th>
+                <th>Line Manager</th>
+                <th>Department</th>
+                <th>Project Assigned</th>
+                <th class="text-center">Allocation %</th>
+                <th>Timeline</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in allocations %}
+            <tr>
+                <td><strong>{{ row.emp_name }}</strong><br><small class="text-muted">{{ row.employee_id }}</small></td>
+                <td>{{ row.LINE_MANAGER_NAME or '-' }}</td>
+                <td><span class="badge bg-light text-dark border">{{ row.DEPARTMENT or '-' }}</span></td>
+                <td>{{ row.project_name }}</td>
+                <td class="text-center fw-bold text-primary">{{ row.allocation_percentage }}%</td>
+                <td><small>{{ row.start_date }} to {{ row.end_date or 'Ongoing' }}</small></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center py-4 text-muted">No records matching selection criteria found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
