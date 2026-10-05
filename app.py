@@ -181,6 +181,5 @@ def manage_allocations():
 
 
 if __name__ == '__main__':
-    # Dynamically bind to the platform's allocated system port
-    port = int(os.environ.get("DATABRICKS_APP_PORT", 8000))
-    app.run(host='0.0.0.0', port=port)
+    # Databricks Apps routes proxying via Port 8000 natively
+    app.run(host='0.0.0.0', port=8000, debug=True)
