@@ -90,8 +90,25 @@ def fetch_capacity_metrics(department_filter=None):
             'optimal': int((df[col] == df['capex_target']).sum())
         }
     return metrics
+
+# 3. HTTP Routes
+
+@app.route('/')
+def index():
+    """Fallback index route listening to the root and redirecting to /summary."""
+    return redirect(url_for('portfolio_summary'))
+
+@app.route('/summary')
+def portfolio_summary():
+    selected_dept = request.args.get('department', '')
     
-# 3. Dynamic Form Validation Block (UPDATED TO VALIDATE AGAINST e.CAPEX)
+    # Get dynamic filters from database
+    depts_df = query_as_dataframe("SELECT DISTINCT DEPARTMENT FROM EMPLOYEE WHERE DEPARTMENT IS NOT NULL ORDER BY DEPARTMENT")
+    departments = depts_df['DEPARTMENT'].tolist() if not depts_df.empty else []
+    
+    metrics = fetch_capacity_metrics(selected_dept if selected_dept else None)
+    return render_template('summary.html', metrics=metrics, departments=departments, selected_dept=selected_dept)
+
 @app.route('/manage', methods=['GET', 'POST'])
 def manage_allocations():
     if request.method == 'POST':
@@ -146,7 +163,7 @@ def manage_allocations():
         flash("💪 Allocation successfully saved!", "success")
         return redirect(url_for('manage_allocations'))
 
-    # Rest of the GET workflow filters remain intact...
+    # GET workflow filters handling
     f_emp = request.args.get('employee_name', '')
     f_mgr = request.args.get('line_manager', '')
     f_dept = request.args.get('department', '')
@@ -185,7 +202,6 @@ def manage_allocations():
 
     return render_template('manage.html', allocations=allocations, projects=projects, 
                            employees=employees_lookup, f_emp=f_emp, f_mgr=f_mgr, f_dept=f_dept)
-
 
 if __name__ == '__main__':
     # Safely extract the dynamic system integer provided by Databricks
