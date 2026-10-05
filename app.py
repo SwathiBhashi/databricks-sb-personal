@@ -28,7 +28,7 @@ def query_as_dataframe(query, params=None):
             cursor.execute(query, params or ())
             if cursor.description is None:
                 return pd.DataFrame()
-            # FIX: Properly extract just the string header name from the description tuple
+            # FIX: Properly extract just the string header name from the description tuple (desc[0])
             columns = [desc[0] for desc in cursor.description]
             data = cursor.fetchall()
             return pd.DataFrame(data, columns=columns)
@@ -131,12 +131,12 @@ def manage_allocations():
 
         # --- VALIDATION 2: Check limit with dynamic employee profile target ---
         emp_target_df = query_as_dataframe("SELECT COALESCE(CAPEX, 100) as target_limit FROM EMPLOYEE WHERE employee_id = %s", (emp_id,))
-        # FIX: Added .iloc[0] safely to extract row data values
+        # FIX: Added explicitly scoped element selector index [0]
         capex_target = float(emp_target_df['target_limit'].iloc[0] if not emp_target_df.empty else 100.00)
 
         alloc_query = "SELECT SUM(allocation_percentage) as total FROM allocation WHERE employee_id = %s AND is_active = true"
         total_alloc_df = query_as_dataframe(alloc_query, (emp_id,))
-        # FIX: Used .fillna(0).iloc[0] for clean numeric conversions
+        # FIX: Added explicitly scoped element selector index [0]
         current_total = float(total_alloc_df['total'].fillna(0).iloc[0] if not total_alloc_df.empty else 0)
         
         existing_match = query_as_dataframe("SELECT allocation_percentage FROM allocation WHERE employee_id=%s AND project_id=%s AND is_active=true", (emp_id, project_id))
