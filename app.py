@@ -13,23 +13,24 @@ app = Flask(
 )
 app.secret_key = os.urandom(24)
 
-# 1. Databricks SQL Helper Functions (FIXED AUTHENTICATION)
+
+# 1. Databricks SQL Helper Functions (FIXED HOST STRING SPLIT)
 def get_db_connection():
     """Establishes a connection to the Lakebase SQL Warehouse automatically inside Databricks Apps."""
-    # Databricks Apps standard configurations map to specific workspace keywords
     server_hostname = os.environ.get("DATABRICKS_HOST")
     http_path = os.environ.get("DATABRICKS_SQL_HTTP_PATH")
     
-    # Strip any accidental 'https://' prefix if appended by the system env variables
+    # FIX: Properly extract index [0] to keep it a clean string domain name
     if server_hostname and server_hostname.startswith("https://"):
         server_hostname = server_hostname.replace("https://", "", 1).split("/")[0]
 
     return sql.connect(
         server_hostname=server_hostname,
         http_path=http_path,
-        # Natively uses the App's service credential identity context injected in the runtime
+        # Natively map your app context credentials
         access_token=os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_CLIENT_SECRET")
     )
+
 
 def query_as_dataframe(query, params=None):
     with get_db_connection() as conn:
