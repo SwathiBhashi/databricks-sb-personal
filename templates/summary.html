@@ -1,0 +1,33 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>📊 Portfolio Summary Dashboard</h2>
+    <form method="GET" class="d-flex gap-2 bg-white p-2 rounded shadow-sm">
+        <select name="department" class="form-select" style="min-width: 220px;">
+            <option value="">All Departments</option>
+            {% for dept in departments %}
+                <option value="{{ dept }}" {% if selected_dept == dept %}selected{% endif %}>{{ dept }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Filter</button>
+    </form>
+</div>
+
+<div class="row g-4">
+    {% for period, label in [('current_week', '🗓️ Current Week'), ('next_week', '⏭️ Next Week'), ('next_month', '📅 Next Month')] %}
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-secondary text-white fw-bold">{{ label }}</div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between">Active Resources: <span class="badge bg-primary fs-6">{{ metrics[period]['active'] }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between">Under-allocation: <span class="badge bg-warning text-dark fs-6">{{ metrics[period]['under'] }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between">Over-allocation: <span class="badge bg-danger fs-6">{{ metrics[period]['over'] }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between">Optimal-allocation: <span class="badge bg-success fs-6">{{ metrics[period]['optimal'] }}</span></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
