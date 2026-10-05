@@ -1,3 +1,28 @@
+import os
+import pandas as pd
+from flask import Flask, render_template, request, redirect, url_for, flash
+from databricks import sql
+
+app = Flask(__name__)
+app.secret_key = os.urandom(24)
+
+# 1. Databricks SQL Helper Functions
+def get_db_connection():
+    """Establishes a connection to the Lakebase SQL Warehouse automatically."""
+    return sql.connect(
+        server_hostname=os.environ.get("DATABRICKS_HOST"),
+        http_path=os.environ.get("DATABRICKS_SQL_HTTP_PATH"),
+        credentials_provider=lambda: os.environ.get("DATABRICKS_TOKEN")
+    )
+
+def query_as_dataframe(query, params=None):
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params or ())
+            columns = [desc[0] for desc in cursor.description]
+            data = cursor.fetchall()
+            return pd.DataFrame(data, columns=columns)
+
 # 2. Capacity Business Logic Engine (UPDATED TO USE e.CAPEX)
 def fetch_capacity_metrics(department_filter=None):
     """
@@ -58,8 +83,7 @@ def fetch_capacity_metrics(department_filter=None):
             'optimal': int((df[col] == df['capex_target']).sum())
         }
     return metrics
-
-
+    
 # 3. Dynamic Form Validation Block (UPDATED TO VALIDATE AGAINST e.CAPEX)
 @app.route('/manage', methods=['GET', 'POST'])
 def manage_allocations():
@@ -154,3 +178,9 @@ def manage_allocations():
 
     return render_template('manage.html', allocations=allocations, projects=projects, 
                            employees=employees_lookup, f_emp=f_emp, f_mgr=f_mgr, f_dept=f_dept)
+
+
+if __name__ == '__main__':
+    # Dynamically bind to the platform's allocated system port
+    port = int(os.environ.get("DATABRICKS_APP_PORT", 8000))
+    app.run(host='0.0.0.0', port=port)
